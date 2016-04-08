@@ -33,7 +33,7 @@ class Benchmark(object):
         common.printout("LOG","RUNID: %d, RESULT_DIR: %s" % (self.runid, self.cluster["dest_dir"]))
         self.cal_run_job_distribution()
         self.prerun_check()
-        self.prepare_run()
+        #self.prepare_run()
 
         common.printout("LOG","Run Benchmark Status: collect system metrics and run benchmark")
         test_start_time = time.time()
@@ -123,7 +123,6 @@ class Benchmark(object):
         nodes = self.cluster["osd"]
         common.printout("LOG","Prerun_check: check if sysstat installed " % nodes)
         common.pdsh(user, nodes, "mpstat")
-
         if "fatrace" in self.cluster["collector"]:
             common.printout("LOG","Prerun_check: check if fatrace installed " % nodes)
             common.pdsh(user, nodes, "fatrace -h")
@@ -165,7 +164,7 @@ class Benchmark(object):
         common.pdsh(user, nodes, "sar -A %s > %s/`hostname`_sar.txt & echo `date +%s`' sar start' >> %s/`hostname`_process_log.txt" % (monitor_interval, dest_dir, '%s', dest_dir))
         if "perfcounter" in self.cluster["collector"]:
             common.printout("LOG","Start perfcounter data collector under %s " % nodes)
-            common.pdsh(user, nodes, "echo `date +%s`' perfcounter start' >> %s/`hostname`_process_log.txt; for i in `seq 1 %d`; do find /var/run/ceph -name '*osd*asok' | while read path; do filename=`echo $path | awk -F/ '{print $NF}'`;res_file=%s/`hostname`_${filename}.txt; echo `ceph --admin-daemon $path perf dump`, >> ${res_file} & done; sleep %s; done; echo `date +%s`' perfcounter stop' >> %s/`hostname`_process_log.txt;" % ('%s', dest_dir, time, dest_dir, monitor_interval, '%s', dest_dir), option="force")
+            common.pdsh(user, nodes, "echo `date +%s`' perfcounter start' >> %s/`hostname`_process_log.txt; for i in `seq 1 %d`; do find /var/run/ceph -name '*osd*asok' | while read path; do filename=`echo $path | awk -F/ '{print $NF}'`;res_file=%s/`hostname`_${filename}.txt;ceph --admin-daemon $path perf reset all; echo `ceph --admin-daemon $path perf dump`, >> ${res_file} & done; sleep %s; done; echo `date +%s`' perfcounter stop' >> %s/`hostname`_process_log.txt;" % ('%s', dest_dir, time, dest_dir, monitor_interval, '%s', dest_dir), option="force")
         if "blktrace" in self.cluster["collector"]:
             for node in nodes:
                 common.printout("LOG","Start blktrace data collector under %s " % node)
@@ -181,7 +180,7 @@ class Benchmark(object):
             common.pdsh(user, nodes, "ps aux | grep ceph-osd | grep -v 'grep' | awk '{print $2}' | while read pid;do strace -ttt -T -e trace=desc -p ${pid} -o %s/`hostname`_strace_${pid}.txt 2>&1 > %s/`hostname`_strace_${pid}.log & done" % (dest_dir, dest_dir), option="force")
         if "lttng" in self.cluster["collector"]:
             common.printout("LOG","Start lttng data collector under %s " % nodes)
-            common.pdsh(user, nodes, "export HOME='%s'; lttng destroy 2>/dev/null; lttng create zipkin; lttng enable-channel channel0 -u --buffers-pid; lttng enable-event -c channel0 --userspace zipkin:*; lttng start;" % (dest_dir))
+            common.pdsh(user, nodes, "export HOME='%s'; lttng destroy 2>/dev/null; lttng create zipkin; lttng enable-channel channel0 -u --buffers-pid; lttng enable-event -c channel0 --userspace objectstore:startsync_enter; lttng start;" % (dest_dir))
 
         #2. send command to client
         nodes = self.benchmark["distribution"].keys()
@@ -228,7 +227,11 @@ class Benchmark(object):
                 common.rscp(user, node, "%s/raw/%s/" % (dest_dir, node), "%s/*blktrace*" % self.cluster["tmp_dir"])
             if "lttng" in self.cluster["collector"]:
                 common.rscp(user, node, "%s/raw/%s/" % (dest_dir, node), "%s/lttng-traces" % self.cluster["tmp_dir"])
-
+            if "optracker" in self.cluster["collector"]:
+                path = os.getcwd()
+                common.scp(user, node, "%s/optracker-analyzer.py" % (os.path.dirname(path)), "/usr/bin/")
+                common.pdsh(user, [node], "python /usr/bin/optracker-analyzer.py")
+                common.rscp(user, node, "%s/raw/%s/" % (dest_dir, node), "%s/*optracker.txt" % self.cluster["tmp_dir"])
         #collect client data
         for node in self.benchmark["distribution"].keys():
             common.pdsh(user, [head], "mkdir -p %s/raw/%s" % (dest_dir, node))

@@ -178,8 +178,14 @@ class Visualizer:
                 if node not in data:
                     data[node] = OrderedDict()
                 for key, value in node_data.items():
-                    if not isinstance(value, list):
+                    if isinstance(value, tuple):
+                        data[node][key] = "%.3f" % (numpy.mean(value[1])) #process_optracker_data2
+                        if key not in chart_data:
+                            chart_data[key] = OrderedDict()
+                        chart_data[key][node] = value
+                    elif not isinstance(value, list):
                         data[node][key] = value
+                        #data[node][key] = "%.3f,%.3f" % (numpy.mean(value[0]),numpy.mean(value[1]))
                     else:
                         data[node][key] = "%.3f" % numpy.mean(value)
                         if key not in chart_data:
@@ -189,6 +195,7 @@ class Visualizer:
             output.extend( self.generate_line_chart(chart_data, node_type, field_type ) )
         output.append("</div>")
         return output
+    
 
     def generate_line_chart(self, data, node_type, field, append_table=True):
         output = []
@@ -198,7 +205,13 @@ class Visualizer:
         for field_column, field_data in data.items():
             pyplot.figure(figsize=(9, 4))
             for node, node_data in field_data.items():
-                pyplot.plot(node_data, label=node)
+                if len(node_data) >=1  and isinstance(node_data[0], list) :
+                   #pyplot.plot(node_data[0], node_data[1], label=node)
+                   #pyplot.xlim(0.0, 100.)
+                   bins =numpy.arange(0,500,10)
+                   pyplot.hist(node_data[1], bins)
+                else :
+                    pyplot.plot(node_data, label=node)
             pyplot.xlabel("time(sec)")
             pyplot.ylabel("%s" % field_column)
             # Shrink current axis's height by 10% on the bottom
@@ -242,6 +255,12 @@ class Visualizer:
             output.append("<tr>")
             output.append("<td>%s</td>" % node)
             for key, value in node_data.items():
+                print "-------"
+                print node_data.keys()
+                print value
+                if isinstance(value, tuple): 
+                    import pdb
+                    pdb.set_trace()
                 output.append("<td>%s</td>" % value)
             output.append("</tr>")
         output.append("</tbody>")

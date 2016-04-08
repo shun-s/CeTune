@@ -13,7 +13,6 @@ def main(args):
         '--output',
         )
     args = parser.parse_args(args)
-
     traces = babeltrace.TraceCollection()
     lttng_input = args.path
     if args.output:

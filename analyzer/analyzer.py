@@ -13,6 +13,7 @@ from collections import OrderedDict
 import json
 import numpy
 import copy
+from datetime import timedelta
 
 pp = pprint.PrettyPrinter(indent=4)
 class Analyzer:
@@ -125,7 +126,6 @@ class Analyzer:
         rampup = int(res.group(8))
         runtime = int(res.group(9))
         phase_name_map = {"cpu": "sar", "memory": "sar", "nic": "sar", "osd": "iostat", "journal": "iostat", "vdisk": "iostat" }
-
         for node_type in data.keys():
             if not isinstance(data[node_type], dict):
                 output_sort[node_type] = data[node_type]
@@ -307,6 +307,12 @@ class Analyzer:
             if '_process_log.txt' in dir_name:
                 res = self.process_log_data( "%s/%s/%s" % (dest_dir, node_name, dir_name) )
                 result.update(res)
+            if '_optracker.txt' in dir_name :
+                res = self.process_optracker_data2( "%s/%s/%s" % (dest_dir, node_name, dir_name) )
+                for key, value in res.items():
+                     if dir_name not in workload_result:
+                         workload_result[dir_name] = OrderedDict()
+                     workload_result[dir_name][key] = value
             if '.asok.txt' in dir_name:
                 try:
                     res = self.process_perfcounter_data("%s/%s/%s" % (dest_dir, node_name, dir_name))
@@ -317,6 +323,139 @@ class Analyzer:
                 except:
                     pass
         return [result, workload_result]
+    
+    def process_optracker_data2(self, path) : # hist graph
+        precise_level = int(self.cluster["perfcounter_time_precision_level"])
+        common.printout("LOG","loading %s" % path)
+        res = {}
+        result = {}
+        max_latency_io = []
+        data = json.load(file(path))
+        for osd in data.keys() :  # iterate osd
+            temp_osd_data = {}
+            plot_data = ([],[])
+            seq_max_time = None
+            temp_time = 0
+            for seq in data[osd].keys() :
+                if data[osd][seq].has_key("all_read") and data[osd][seq].has_key("done") :
+                    start_time = data[osd][seq]["all_read"] # u'11:51:59.172819'
+                    start_time = timedelta(hours=int(start_time[0:2]), minutes=int(start_time[3:5]), seconds=int(start_time[6:8]), microseconds=int(start_time[9:]))
+                    end_time = data[osd][seq]["done"]
+                    end_time = timedelta(hours=int(end_time[0:2]), minutes=int(end_time[3:5]), seconds=int(end_time[6:8]), microseconds=int(end_time[9:]))
+                    use_time = end_time - start_time
+                    use_time = use_time.seconds * 1000000 + use_time.microseconds
+                    plot_data[1].append(use_time)
+                    if use_time >= temp_time :
+                       temp_time = use_time
+                       seq_max_time = seq   # record max seq
+            temp_time = data[osd][seq_max_time]['all_read']
+            temp_delta = timedelta(hours=int(temp_time[0:2]), minutes=int(temp_time[3:5]), seconds=int(temp_time[6:8]), microseconds=int(temp_time[9:]))
+            for event in data[osd][seq_max_time].keys() :
+                
+                start_time = data[osd][seq_max_time][event]
+                time = timedelta(hours=int(start_time[0:2]), minutes=int(start_time[3:5]), seconds=int(start_time[6:8]), microseconds=int(start_time[9:]))
+                time_use = time - temp_delta
+                temp_delta = time
+                microseconds = time_use.seconds * 1000000 + time_use.microseconds
+                max_latency_io.append(microseconds)
+            res = plot_data
+            
+        return {"optracker": {"latency": res, "max_latency_io": max_latency_io}}
+       # return {"optracker": {"latency": res}}
+    def process_optracker_data(self, path) :
+        precise_level = int(self.cluster["perfcounter_time_precision_level"])
+        common.printout("LOG","loading %s" % path)
+        latency = {}
+        result = {}
+        data = json.load(file(path))
+        for osd in data.keys() :  # iterate osd
+           temp_osd_data = {}
+           plot_data = ([],[])
+           for seq in data[osd].keys() :
+               if data[osd][seq].has_key("all_read") and data[osd][seq].has_key("done") :
+                   start_time = data[osd][seq]["all_read"] # u'11:51:59.172819'
+                   start_time = timedelta(hours=int(start_time[0:2]), minutes=int(start_time[3:5]), seconds=int(start_time[6:8]), microseconds=int(start_time[9:]))
+                   end_time = data[osd][seq]["done"]
+                   end_time = timedelta(hours=int(end_time[0:2]), minutes=int(end_time[3:5]), seconds=int(end_time[6:8]), microseconds=int(end_time[9:]))
+                   use_time = end_time - start_time
+                   use_time = use_time.seconds * 1000000 + use_time.microseconds
+                   temp_osd_data[seq] = use_time
+           if len(temp_osd_data) == 0 :
+               continue
+           result[osd] = temp_osd_data
+
+           # time to figure out x,y axes
+           # 1. get avg io completion time , min and max time
+        for osd in result.keys() :
+           latency_sum = 0
+           latency_min = 0
+           latency_max = 0
+           min_count = 0
+           min_avg_count = 0
+           avg_count = 0
+           avg_max_count = 0
+           max_count = 0
+           latency_key = ''
+           for key, value in result[osd].items() :
+               latency_sum = latency_sum + value
+               if value > latency_max :
+                   latency_max = value
+                   latency_key = key
+               if value < latency_min :
+                   latency_min = value
+           if len(result[osd]) :
+               latency_avg = latency_sum / len(result[osd])
+           else :
+               latency_avg = 0
+           # 2. get x axes element
+           latency_min_avg = (latency_min + latency_avg) / 2
+           latency_avg_max = (latency_avg + latency_max) / 2
+           plot_data[0].append(latency_min)
+           plot_data[0].append(latency_min_avg)
+           plot_data[0].append(latency_avg)
+           plot_data[0].append(latency_avg_max)
+           plot_data[0].append(latency_max)
+           #plot_data[0].extend([latency_min,latency_min_avg,latency_avg,latency_avg_max,latency_max])
+           plot_data[1].append(min_count)
+           plot_data[1].append(min_avg_count)
+           plot_data[1].append(avg_count)
+           plot_data[1].append(avg_max_count)
+           plot_data[1].append(max_count)
+           #plot_data[1].extend([min_count,min_avg_count,avg_count,avg_max_count,max_count])
+           break
+        max_latency_io = []
+        for osd in result.keys() :
+           # 3. statistic
+           min_count = 0
+           min_avg_count = 0
+           avg_count = 0
+           avg_max_count = 0
+           max_count = 0
+           for key,value in result[osd].items() :
+               if value <= plot_data[0][0] :
+                   min_count =min_count + 1
+               elif value <= plot_data[0][1] :
+                   min_avg_count = min_avg_count + 1
+               elif value <= plot_data[0][2] :
+                   avg_count = avg_count + 1
+               elif value <= plot_data[0][3] :
+                   avg_max_count = avg_max_count + 1
+               else :
+                   max_count = max_count + 1
+           plot_data[1][0] = min_count
+           plot_data[1][1] = min_avg_count
+           plot_data[1][2] = avg_count
+           plot_data[1][3] = avg_max_count
+           plot_data[1][4] = max_count
+           latency = plot_data
+           for key in data[osd][latency_key].keys() :
+               start_time = data[osd][latency_key][key]
+               time = timedelta(hours=int(start_time[0:2]), minutes=int(start_time[3:5]), seconds=int(start_time[6:8]), microseconds=int(start_time[9:]))
+               miliseconds = time.seconds * 1000 + time.microseconds / 1000
+               max_latency_io.append(miliseconds)
+        if len(latency) == 0 :
+            return {"optracker": {"latency": None}}
+        return {"optracker": {"latency": latency, "max_latency_io": max_latency_io}}
 
     def process_log_data(self, path):
         result = {}

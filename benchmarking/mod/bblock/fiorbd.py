@@ -33,9 +33,9 @@ class FioRbd(Benchmark):
         fio_job_num_total = 0
         clients = self.cluster["testjob_distribution"].keys()
         for client in self.cluster["testjob_distribution"]:
-            common.scp(user, client, "../conf/fio_init.conf", dest_dir)
+            common.scp(user, client, "../conf/fio.conf", dest_dir)
             rbdlist = ' '.join(self.cluster["testjob_distribution"][client])
-            res = common.pdsh(user, [client], "for rbdname in %s; do POOLNAME=%s RBDNAME=${rbdname} fio --section init-write %s/fio_init.conf  & done" % (rbdlist, 'rbd', dest_dir), option = "force")         
+            res = common.pdsh(user, [client], "for rbdname in %s; do POOLNAME=%s RBDNAME=${rbdname} fio %s/fio.conf  & done" % (rbdlist, 'rbd', dest_dir), option = "force")         
             fio_job_num_total += len(self.cluster["testjob_distribution"][client])
         time.sleep(1)
         if not self.check_fio_pgrep(clients, fio_job_num_total):
@@ -87,7 +87,6 @@ class FioRbd(Benchmark):
         user = self.cluster["user"]
         waittime = int(self.benchmark["runtime"]) + int(self.benchmark["rampup"])
         dest_dir = self.cluster["tmp_dir"]
-
         nodes = self.benchmark["distribution"].keys()
         fio_job_num_total = 0
         for client in self.benchmark["distribution"]:
